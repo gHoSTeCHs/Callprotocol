@@ -1,0 +1,103 @@
+import { Contact, RecentCall } from '@/types';
+
+export const contactsData: Contact[] = [
+    {
+        id: 1,
+        name: 'Alex Johnson',
+        avatar: '/api/placeholder/40/40',
+        status: 'online',
+        lastSeen: 'Just now',
+        favorite: true,
+    },
+    {
+        id: 2,
+        name: 'Morgan Smith',
+        avatar: '/api/placeholder/40/40',
+        status: 'offline',
+        lastSeen: '2h ago',
+        favorite: true,
+    },
+    {
+        id: 3,
+        name: 'Taylor Wilson',
+        avatar: '/api/placeholder/40/40',
+        status: 'online',
+        lastSeen: 'Just now',
+        favorite: false,
+    },
+    {
+        id: 4,
+        name: 'Jordan Brown',
+        avatar: '/api/placeholder/40/40',
+        status: 'busy',
+        lastSeen: '30m ago',
+        favorite: false,
+    },
+    {
+        id: 5,
+        name: 'Casey Davis',
+        avatar: '/api/placeholder/40/40',
+        status: 'away',
+        lastSeen: '1h ago',
+        favorite: false,
+    },
+    {
+        id: 6,
+        name: 'Riley Martinez',
+        avatar: '/api/placeholder/40/40',
+        status: 'online',
+        lastSeen: 'Just now',
+        favorite: false,
+    },
+    {
+        id: 7,
+        name: 'Avery Thomas',
+        avatar: '/api/placeholder/40/40',
+        status: 'offline',
+        lastSeen: '1d ago',
+        favorite: false,
+    },
+    {
+        id: 8,
+        name: 'Quinn Robinson',
+        avatar: '/api/placeholder/40/40',
+        status: 'online',
+        lastSeen: 'Just now',
+        favorite: false,
+    },
+];
+
+export const recentCallsData: RecentCall[] = [
+    {
+        id: 1,
+        name: 'Morgan Smith',
+        avatar: '/api/placeholder/40/40',
+        type: 'video',
+        time: 'Today, 10:45 AM',
+        missed: false,
+    },
+    {
+        id: 2,
+        name: 'Alex Johnson',
+        avatar: '/api/placeholder/40/40',
+        type: 'audio',
+        time: 'Today, 9:30 AM',
+        missed: true,
+    },
+    {
+        id: 3,
+        name: 'Casey Davis',
+        avatar: '/api/placeholder/40/40',
+        type: 'video',
+        time: 'Yesterday, 6:12 PM',
+        missed: false,
+    },
+    {
+        id: 4,
+        name: 'Jordan Brown',
+        avatar: '/api/placeholder/40/40',
+        type: 'audio',
+        time: 'Yesterday, 2:30 PM',
+        missed: false,
+    },
+];

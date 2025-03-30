@@ -43,10 +43,10 @@ export interface User {
     [key: string]: unknown;
 }
 
-type ContactStatus = 'online' | 'offline' | 'busy' | 'away';
-type CallType = 'audio' | 'video' | null;
+export type ContactStatus = 'online' | 'offline' | 'busy' | 'away';
+export type CallType = 'audio' | 'video' | null;
 
-interface Contact {
+export interface Contact {
     id: number;
     name: string;
     avatar: string;
@@ -59,7 +59,7 @@ interface Contact {
     location?: string;
 }
 
-interface RecentCall {
+export interface RecentCall {
     id: number;
     name: string;
     avatar: string;
