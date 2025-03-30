@@ -3,10 +3,25 @@
 namespace App\Http\Controllers;
 
 use App\Models\Call;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CallController extends Controller
 {
+
+    public function history(Request $request): JsonResponse
+    {
+        $userId = $request->user()->id;
+
+        $calls = Call::query()->where('caller_id', $userId)
+            ->orWhere('callee_id', $userId)
+            ->with(['caller', 'callee'])
+            ->orderBy('created_at', 'desc')
+            ->take(50)
+            ->get();
+
+        return response()->json($calls);
+    }
     /**
      * Display a listing of the resource.
      */

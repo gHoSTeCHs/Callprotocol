@@ -27,6 +27,7 @@ export interface SharedData {
     quote: { message: string; author: string };
     auth: Auth;
     ziggy: Config & { location: string };
+
     [key: string]: unknown;
 }
 
@@ -38,5 +39,31 @@ export interface User {
     email_verified_at: string | null;
     created_at: string;
     updated_at: string;
-    [key: string]: unknown; // This allows for additional properties...
+
+    [key: string]: unknown;
+}
+
+type ContactStatus = 'online' | 'offline' | 'busy' | 'away';
+type CallType = 'audio' | 'video' | null;
+
+interface Contact {
+    id: number;
+    name: string;
+    avatar: string;
+    status: ContactStatus;
+    lastSeen: string;
+    favorite: boolean;
+    email?: string;
+    phone?: string;
+    department?: string;
+    location?: string;
+}
+
+interface RecentCall {
+    id: number;
+    name: string;
+    avatar: string;
+    type: 'audio' | 'video';
+    time: string;
+    missed: boolean;
 }
