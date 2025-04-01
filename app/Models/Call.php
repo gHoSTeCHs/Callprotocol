@@ -50,3 +50,4 @@ class Call extends Model
         return $this->belongsTo(User::class, 'callee_id');
     }
 }
+
