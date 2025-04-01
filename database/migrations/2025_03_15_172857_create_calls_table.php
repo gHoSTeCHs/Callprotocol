@@ -12,12 +12,16 @@ return new class extends Migration {
     {
         Schema::create('calls', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('caller_id')->constrained('users');
-            $table->foreignId('callee_id')->constrained('users');
-            $table->enum('status', ['initiated', 'ongoing', 'completed', 'missed', 'rejected'])->default('initiated');
-            $table->integer('duration')->nullable();
+            $table->unsignedBigInteger('caller_id');
+            $table->unsignedBigInteger('receiver_id');
+            $table->enum('type', ['audio', 'video']);
+            $table->enum('status', ['ringing', 'accepted', 'rejected', 'ended'])->default('ringing');
+            $table->timestamp('started_at')->nullable();
             $table->timestamp('ended_at')->nullable();
             $table->timestamps();
+
+            $table->foreign('caller_id')->references('id')->on('users');
+            $table->foreign('receiver_id')->references('id')->on('users');
         });
     }
 

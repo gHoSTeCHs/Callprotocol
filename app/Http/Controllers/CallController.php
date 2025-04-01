@@ -2,79 +2,65 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\CallStatusChanged;
+use App\Events\IncomingCall;
 use App\Models\Call;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class CallController extends Controller
 {
 
-    public function history(Request $request): JsonResponse
+    public function initiateCall(Request $request): JsonResponse
     {
-        $userId = $request->user()->id;
+        $request->validate([
+            'receiver_id' => 'required|exists:users,id',
+            'type' => 'required|in:audio,video',
+        ]);
 
-        $calls = Call::query()->where('caller_id', $userId)
-            ->orWhere('callee_id', $userId)
-            ->with(['caller', 'callee'])
-            ->orderBy('created_at', 'desc')
-            ->take(50)
-            ->get();
+        $caller = Auth::user();
+        $receiver = User::query()->find($request->receiver_id);
 
-        return response()->json($calls);
-    }
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
-    {
-        //
-    }
+        // Create a new call record
+        $call = Call::query()->create([
+            'caller_id' => $caller->id,
+            'receiver_id' => $receiver->id,
+            'type' => $request->type,
+            'status' => 'ringing',
+        ]);
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
+        // Broadcast event to the receiver
+        broadcast(new IncomingCall($call, $caller, $receiver))->toOthers();
+
+        return response()->json([
+            'call_id' => $call->id,
+            'status' => 'ringing'
+        ]);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request)
+    public function updateCallStatus(Request $request, Call $call): JsonResponse
     {
-        //
-    }
+        $request->validate([
+            'status' => 'required|in:accepted,rejected,ended',
+        ]);
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(Call $call)
-    {
-        //
-    }
+        $call->status = $request->status;
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Call $call)
-    {
-        //
-    }
+        if ($request->status === 'accepted') {
+            $call->started_at = now();
+        }
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, Call $call)
-    {
-        //
-    }
+        if ($request->status === 'ended' || $request->status === 'rejected') {
+            $call->ended_at = now();
+        }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Call $call)
-    {
-        //
+        $call->save();
+
+        // Broadcast the updated status
+        broadcast(new CallStatusChanged($call))->toOthers();
+
+        return response()->json(['status' => $call->status]);
     }
 }
