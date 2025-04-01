@@ -17,13 +17,7 @@ class Call extends Model
      *
      * @var array<int, string>
      */
-    protected $fillable = [
-        'caller_id',
-        'callee_id',
-        'status',
-        'duration',
-        'ended_at',
-    ];
+    protected $fillable = ['caller_id', 'receiver_id', 'type', 'status'];
 
     /**
      * The attributes that should be cast.

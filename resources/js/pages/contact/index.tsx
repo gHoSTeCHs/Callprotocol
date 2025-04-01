@@ -1,3 +1,4 @@
+import IncomingCallDialog from '@/components/incoming-call';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,10 +10,33 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { contactsData, recentCallsData } from '@/constants/data';
 import AppLayout from '@/layouts/app-layout';
-import type { BreadcrumbItem, CallType, Contact, ContactStatus } from '@/types';
-import { Head } from '@inertiajs/react';
+import type { BreadcrumbItem, CallType, Contact, ContactStatus, SharedData } from '@/types';
+import { Head, usePage } from '@inertiajs/react';
+import axios from 'axios';
 import { Mic, MicOff, MoreHorizontal, Phone, PhoneOff, User, UserPlus, Video, VideoOff } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
+declare global {
+    interface Window {
+        Echo: any;
+        userId: number;
+    }
+}
+
+interface IncomingCallData {
+    call_id: number;
+    type: 'audio' | 'video';
+    caller: {
+        id: number;
+        name: string;
+        avatar: string;
+    };
+}
+
+interface CallStatusData {
+    call_id: number;
+    status: 'accepted' | 'rejected' | 'ended';
+}
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -21,6 +45,8 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
+    const { auth } = usePage<SharedData>().props;
+
     const [contacts, setContacts] = useState<Contact[]>(userContacts);
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -29,24 +55,122 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
     const [isMuted, setIsMuted] = useState<boolean>(false);
     const [isVideoOff, setIsVideoOff] = useState<boolean>(false);
 
-    console.log(userContacts);
+    // Incoming calls state variables
+    const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
+    const [activeCallId, setActiveCallId] = useState<number | null>(null);
+    const [isInitiatingCall, setIsInitiatingCall] = useState<boolean>(false);
 
     const localVideoRef = useRef<HTMLVideoElement | null>(null);
     const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
     const filteredContacts = contacts.filter((contact) => contact.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    const startCall = (contact: Contact, type: 'audio' | 'video'): void => {
+    useEffect(() => {
+        const userId = auth.user.id;
+
+        const channel = window.Echo.private(`user.${userId}`);
+
+        channel.listen('IncomingCall', (data: IncomingCallData) => {
+            console.log('Incoming call:', data);
+            setIncomingCall(data);
+        });
+
+        channel.listen('CallStatusChanged', (data: CallStatusData) => {
+            console.log('Call status changed:', data);
+
+            if (data.status === 'accepted') {
+                if (isInitiatingCall) {
+                    setIsInitiatingCall(false);
+                    setIsCallActive(true);
+                    setActiveCallId(data.call_id);
+                }
+            } else if (data.status === 'rejected' || data.status === 'ended') {
+                if (isInitiatingCall || isCallActive) {
+                    resetCallState();
+                }
+
+                if (incomingCall && incomingCall.call_id === data.call_id) {
+                    setIncomingCall(null);
+                }
+            }
+        });
+
+        return () => {
+            channel.stopListening('IncomingCall');
+            channel.stopListening('CallStatusChanged');
+        };
+    }, [isInitiatingCall, isCallActive, incomingCall, auth.user.id]);
+
+    const resetCallState = () => {
+        setIsCallActive(false);
+        setCallType(null);
+        setIsMuted(false);
+        setIsVideoOff(false);
+        setActiveCallId(null);
+        setIsInitiatingCall(false);
+        // Clean up WebRTC connections here
+    };
+
+    // Modified startCall function to use the backend
+    const startCall = async (contact: Contact, type: 'audio' | 'video'): Promise<void> => {
+        setIsInitiatingCall(true);
         setSelectedContact(contact);
         setCallType(type);
-        setIsCallActive(true);
 
-        if (type === 'video') {
+        try {
+            const response = await axios.post('/calls', {
+                receiver_id: contact.id,
+                type: type,
+            });
+
+            setActiveCallId(response.data.call_id);
+
+            if (type === 'video' && localVideoRef.current) {
+                localVideoRef.current.poster = 'https://placehold.co/640x480';
+            }
+        } catch (error) {
+            console.error('Failed to initiate call:', error);
+            resetCallState();
+        }
+    };
+
+    const endCall = async (): Promise<void> => {
+        if (activeCallId) {
+            try {
+                await axios.patch(`/calls/${activeCallId}`, {
+                    status: 'ended',
+                });
+            } catch (error) {
+                console.error('Failed to end call:', error);
+            }
+        }
+
+        resetCallState();
+    };
+
+    const handleAcceptIncomingCall = () => {
+        if (!incomingCall) return;
+
+        const caller = contacts.find((c) => c.id === incomingCall.caller.id) || {
+            id: incomingCall.caller.id,
+            name: incomingCall.caller.name,
+            avatar: incomingCall.caller.avatar,
+            status: 'online' as ContactStatus,
+            lastSeen: 'just now',
+            favorite: false,
+        };
+
+        setSelectedContact(caller);
+        setCallType(incomingCall.type);
+        setIsCallActive(true);
+        setActiveCallId(incomingCall.call_id);
+        setIncomingCall(null);
+
+        if (incomingCall.type === 'video') {
             setTimeout(() => {
                 if (localVideoRef.current) {
                     localVideoRef.current.poster = 'https://placehold.co/640x480';
                 }
-
                 setTimeout(() => {
                     if (remoteVideoRef.current) {
                         remoteVideoRef.current.poster = 'https://placehold.co/640x480';
@@ -56,11 +180,9 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
         }
     };
 
-    const endCall = (): void => {
-        setIsCallActive(false);
-        setCallType(null);
-        setIsMuted(false);
-        setIsVideoOff(false);
+    // Handle incoming call rejection
+    const handleRejectIncomingCall = () => {
+        setIncomingCall(null);
     };
 
     const getStatusColor = (status: ContactStatus): string => {
@@ -312,6 +434,20 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                     </div>
                 </div>
 
+                {/* Incoming Call Dialog */}
+
+                {incomingCall && (
+                    <IncomingCallDialog
+                        callId={incomingCall.call_id}
+                        callerId={incomingCall.caller.id}
+                        callerName={incomingCall.caller.name}
+                        callerAvatar={incomingCall.caller.avatar}
+                        callType={incomingCall.type}
+                        onAccept={handleAcceptIncomingCall}
+                        onReject={handleRejectIncomingCall}
+                    />
+                )}
+
                 {/* Call Dialog */}
                 <Dialog open={isCallActive} onOpenChange={(value) => !value && endCall()}>
                     <DialogContent className={callType === 'video' ? 'sm:max-w-xl' : 'sm:max-w-md'}>
@@ -369,6 +505,25 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                             )}
                             <Button variant="destructive" size="icon" className="h-12 w-12 rounded-full" onClick={endCall}>
                                 {callType === 'video' ? <VideoOff /> : <PhoneOff />}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                <Dialog open={isInitiatingCall} onOpenChange={(value) => !value && endCall()}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Calling {selectedContact?.name}...</DialogTitle>
+                        </DialogHeader>
+                        <div className="flex justify-center py-8">
+                            <Avatar className="h-32 w-32">
+                                <AvatarImage src={selectedContact?.avatar} alt={selectedContact?.name} />
+                                <AvatarFallback className="text-4xl">{selectedContact?.name.charAt(0)}</AvatarFallback>
+                            </Avatar>
+                        </div>
+                        <DialogFooter className="mt-4 flex justify-center">
+                            <Button variant="destructive" size="icon" className="h-12 w-12 rounded-full" onClick={endCall}>
+                                <PhoneOff />
                             </Button>
                         </DialogFooter>
                     </DialogContent>
