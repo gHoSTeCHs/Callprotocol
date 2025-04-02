@@ -4,15 +4,14 @@ namespace App\Events;
 
 use App\Models\Call;
 use App\Models\User;
-use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class IncomingCall implements ShouldBroadcast
+class IncomingCall implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
@@ -20,7 +19,7 @@ class IncomingCall implements ShouldBroadcast
     public User $caller;
     public User $receiver;
 
-    public function __construct(Call $call, User $caller, User $receiver)
+    public function __construct(Call $call, $caller, User $receiver)
     {
         $this->call = $call;
         $this->caller = $caller;

@@ -13,5 +13,3 @@ window.Echo = new Echo({
     enabledTransports: ['ws', 'wss'],
 });
 
-window.userId = window.userId || (window.Inertia?.page?.props?.auth?.user?.id);
-

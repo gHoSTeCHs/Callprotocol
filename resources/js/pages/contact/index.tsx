@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { contactsData, recentCallsData } from '@/constants/data';
+import { WebRTCService } from '@/services/webrtcService';
+
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem, CallType, Contact, ContactStatus, SharedData } from '@/types';
 import { Head, usePage } from '@inertiajs/react';
@@ -18,6 +20,7 @@ import { useEffect, useRef, useState } from 'react';
 
 declare global {
     interface Window {
+        // ts-ignore
         Echo: any;
         userId: number;
     }
@@ -55,64 +58,196 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
     const [isMuted, setIsMuted] = useState<boolean>(false);
     const [isVideoOff, setIsVideoOff] = useState<boolean>(false);
 
-    // Incoming calls state variables
     const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
     const [activeCallId, setActiveCallId] = useState<number | null>(null);
     const [isInitiatingCall, setIsInitiatingCall] = useState<boolean>(false);
 
+    // Refs to access current state in event listeners
+    const isInitiatingCallRef = useRef<boolean>(false);
+    const isCallActiveRef = useRef<boolean>(false);
+    const incomingCallRef = useRef<IncomingCallData | null>(null);
+    const selectedContactRef = useRef<Contact | null>(null);
+    const activeCallIdRef = useRef<number | null>(null);
+
+    // Update refs when state changes
+    useEffect(() => {
+        isInitiatingCallRef.current = isInitiatingCall;
+    }, [isInitiatingCall]);
+
+    useEffect(() => {
+        isCallActiveRef.current = isCallActive;
+    }, [isCallActive]);
+
+    useEffect(() => {
+        incomingCallRef.current = incomingCall;
+    }, [incomingCall]);
+
+    useEffect(() => {
+        selectedContactRef.current = selectedContact;
+    }, [selectedContact]);
+
+    useEffect(() => {
+        activeCallIdRef.current = activeCallId;
+    }, [activeCallId]);
+
+    const webRTCServiceRef = useRef<WebRTCService | null>(null);
     const localVideoRef = useRef<HTMLVideoElement | null>(null);
     const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
     const filteredContacts = contacts.filter((contact) => contact.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
+    const handleSignalingMessage = async (message: any) => {
+        try {
+            await axios.post('/signaling', {
+                receiver_id: selectedContactRef.current?.id,
+                call_id: activeCallIdRef.current,
+                signal: message,
+            });
+        } catch (error) {
+            console.error('Failed to send signaling message:', error);
+        }
+    };
+
+    // Set up event listeners only once when component mounts
     useEffect(() => {
         const userId = auth.user.id;
 
+        if (!window.Echo) {
+            console.error('Echo is not initialized!');
+            return;
+        }
+
         const channel = window.Echo.private(`user.${userId}`);
 
+        // Listen for incoming calls
         channel.listen('IncomingCall', (data: IncomingCallData) => {
-            console.log('Incoming call:', data);
+            console.log('Incoming call event received:', data);
             setIncomingCall(data);
         });
 
         channel.listen('CallStatusChanged', (data: CallStatusData) => {
-            console.log('Call status changed:', data);
+            console.log('Call status changed event received:', data);
 
             if (data.status === 'accepted') {
-                if (isInitiatingCall) {
+                if (isInitiatingCallRef.current) {
                     setIsInitiatingCall(false);
                     setIsCallActive(true);
                     setActiveCallId(data.call_id);
+
+                    initializeWebRTC(true).catch((error) => {
+                        console.error('Failed to initialize WebRTC after call acceptance:', error);
+                        resetCallState();
+                    });
                 }
             } else if (data.status === 'rejected' || data.status === 'ended') {
-                if (isInitiatingCall || isCallActive) {
+                if (isInitiatingCallRef.current || isCallActiveRef.current) {
                     resetCallState();
                 }
 
-                if (incomingCall && incomingCall.call_id === data.call_id) {
+                if (incomingCallRef.current && incomingCallRef.current.call_id === data.call_id) {
                     setIncomingCall(null);
                 }
             }
         });
 
+        channel.listen('WebRTCSignal', (data: any) => {
+            console.log('WebRTC signal received:', data);
+
+            if (!webRTCServiceRef.current) {
+                console.warn('WebRTC service not initialized when signal received');
+                return;
+            }
+
+            const signal = data.signal;
+
+            try {
+                if (signal.type === 'offer') {
+                    webRTCServiceRef.current.handleIncomingCall(signal).catch((error) => {
+                        console.error('Error handling incoming call offer:', error);
+                    });
+                } else if (signal.type === 'answer') {
+                    webRTCServiceRef.current.handleAnswer(signal).catch((error) => {
+                        console.error('Error handling call answer:', error);
+                    });
+                } else if (signal.type === 'candidate') {
+                    webRTCServiceRef.current.handleIceCandidate(signal.candidate).catch((error) => {
+                        console.error('Error handling ICE candidate:', error);
+                    });
+                } else {
+                    console.warn('Unknown signal type received:', signal.type);
+                }
+            } catch (error) {
+                console.error('Error processing WebRTC signal:', error);
+            }
+        });
+
+        // Cleanup function runs when component unmounts
         return () => {
+            console.log('Cleaning up Echo listeners');
             channel.stopListening('IncomingCall');
             channel.stopListening('CallStatusChanged');
+            channel.stopListening('WebRTCSignal');
         };
-    }, [isInitiatingCall, isCallActive, incomingCall, auth.user.id]);
+    }, [auth.user.id]);
+
+    // Initialize WebRTC
+    const initializeWebRTC = async (isInitiator: boolean) => {
+        console.log(`Initializing WebRTC as ${isInitiator ? 'initiator' : 'receiver'}`);
+
+        if (!webRTCServiceRef.current) {
+            webRTCServiceRef.current = new WebRTCService(handleSignalingMessage);
+        }
+
+        try {
+            const localStream = await webRTCServiceRef.current.startLocalStream(callType === 'video');
+
+            if (localVideoRef.current && localStream) {
+                localVideoRef.current.srcObject = localStream;
+            }
+
+            webRTCServiceRef.current.setRemoteStreamCallback((remoteStream) => {
+                console.log('Remote stream received');
+                if (remoteVideoRef.current) {
+                    remoteVideoRef.current.srcObject = remoteStream;
+                }
+            });
+
+            if (isInitiator) {
+                console.log('Creating and sending offer');
+                await webRTCServiceRef.current.initiateCall();
+            }
+        } catch (error) {
+            console.error('Failed to initialize WebRTC:', error);
+            resetCallState();
+            throw error;
+        }
+    };
 
     const resetCallState = () => {
+        console.log('Resetting call state');
+        if (webRTCServiceRef.current) {
+            webRTCServiceRef.current.disconnect();
+            webRTCServiceRef.current = null;
+        }
+
         setIsCallActive(false);
         setCallType(null);
         setIsMuted(false);
         setIsVideoOff(false);
         setActiveCallId(null);
         setIsInitiatingCall(false);
-        // Clean up WebRTC connections here
+
+        if (localVideoRef.current) {
+            localVideoRef.current.srcObject = null;
+        }
+
+        if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = null;
+        }
     };
 
-    // Modified startCall function to use the backend
     const startCall = async (contact: Contact, type: 'audio' | 'video'): Promise<void> => {
+        console.log(`Starting ${type} call with ${contact.name}`);
         setIsInitiatingCall(true);
         setSelectedContact(contact);
         setCallType(type);
@@ -123,11 +258,8 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                 type: type,
             });
 
+            console.log('Call initiated successfully:', response.data);
             setActiveCallId(response.data.call_id);
-
-            if (type === 'video' && localVideoRef.current) {
-                localVideoRef.current.poster = 'https://placehold.co/640x480';
-            }
         } catch (error) {
             console.error('Failed to initiate call:', error);
             resetCallState();
@@ -135,6 +267,7 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
     };
 
     const endCall = async (): Promise<void> => {
+        console.log('Ending call');
         if (activeCallId) {
             try {
                 await axios.patch(`/calls/${activeCallId}`, {
@@ -148,8 +281,24 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
         resetCallState();
     };
 
+    const toggleMute = (): void => {
+        setIsMuted(!isMuted);
+        if (webRTCServiceRef.current) {
+            webRTCServiceRef.current.toggleMute(!isMuted);
+        }
+    };
+
+    const toggleVideo = (): void => {
+        setIsVideoOff(!isVideoOff);
+        if (webRTCServiceRef.current) {
+            webRTCServiceRef.current.toggleVideo(!isVideoOff);
+        }
+    };
+
     const handleAcceptIncomingCall = () => {
         if (!incomingCall) return;
+
+        console.log('Accepting incoming call:', incomingCall);
 
         const caller = contacts.find((c) => c.id === incomingCall.caller.id) || {
             id: incomingCall.caller.id,
@@ -166,22 +315,26 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
         setActiveCallId(incomingCall.call_id);
         setIncomingCall(null);
 
-        if (incomingCall.type === 'video') {
-            setTimeout(() => {
-                if (localVideoRef.current) {
-                    localVideoRef.current.poster = 'https://placehold.co/640x480';
-                }
-                setTimeout(() => {
-                    if (remoteVideoRef.current) {
-                        remoteVideoRef.current.poster = 'https://placehold.co/640x480';
-                    }
-                }, 2000);
-            }, 500);
-        }
+        // Initialize WebRTC as receiver
+        initializeWebRTC(false).catch((error) => {
+            console.error('Failed to initialize WebRTC when accepting call:', error);
+            resetCallState();
+        });
     };
 
-    // Handle incoming call rejection
-    const handleRejectIncomingCall = () => {
+    const handleRejectIncomingCall = async () => {
+        if (!incomingCall) return;
+
+        console.log('Rejecting incoming call:', incomingCall);
+
+        try {
+            await axios.patch(`/calls/${incomingCall.call_id}`, {
+                status: 'rejected',
+            });
+        } catch (error) {
+            console.error('Failed to reject call:', error);
+        }
+
         setIncomingCall(null);
     };
 
@@ -341,7 +494,7 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         const contact = contactsData.find((c) => c.name === call.name);
-                                                        if (contact) startCall(contact, call.type);
+                                                        if (contact) startCall(contact, call.type).then();
                                                     }}
                                                 >
                                                     {call.type === 'audio' ? <Phone size={16} /> : <Video size={16} />}
@@ -435,7 +588,6 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                 </div>
 
                 {/* Incoming Call Dialog */}
-
                 {incomingCall && (
                     <IncomingCallDialog
                         callId={incomingCall.call_id}
@@ -462,22 +614,9 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
 
                         {callType === 'video' ? (
                             <div className="relative mb-4 aspect-video overflow-hidden rounded-lg bg-gray-900">
-                                <video
-                                    ref={remoteVideoRef}
-                                    className="h-full w-full object-cover"
-                                    poster="https://placehold.co/640x360"
-                                    autoPlay
-                                    playsInline
-                                />
+                                <video ref={remoteVideoRef} className="h-full w-full object-cover" autoPlay playsInline />
                                 <div className="absolute right-4 bottom-4 h-32 w-32 overflow-hidden rounded-lg border-2 border-white bg-gray-800">
-                                    <video
-                                        ref={localVideoRef}
-                                        className="h-full w-full object-cover"
-                                        poster="https://placehold.co/160x160"
-                                        autoPlay
-                                        playsInline
-                                        muted
-                                    />
+                                    <video ref={localVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
                                     {isVideoOff && (
                                         <div className="bg-opacity-70 absolute inset-0 flex items-center justify-center bg-gray-900">
                                             <VideoOff size={24} />
@@ -495,11 +634,11 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                         )}
 
                         <DialogFooter className="mt-4 flex justify-center gap-4">
-                            <Button variant="outline" size="icon" className="h-12 w-12 rounded-full" onClick={() => setIsMuted(!isMuted)}>
+                            <Button variant="outline" size="icon" className="h-12 w-12 rounded-full" onClick={toggleMute}>
                                 {isMuted ? <MicOff /> : <Mic />}
                             </Button>
                             {callType === 'video' && (
-                                <Button variant="outline" size="icon" className="h-12 w-12 rounded-full" onClick={() => setIsVideoOff(!isVideoOff)}>
+                                <Button variant="outline" size="icon" className="h-12 w-12 rounded-full" onClick={toggleVideo}>
                                     {isVideoOff ? <VideoOff /> : <Video />}
                                 </Button>
                             )}
