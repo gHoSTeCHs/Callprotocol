@@ -108,6 +108,17 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
         }
     };
 
+    const checkMediaPermissions = async () => {
+        try {
+            const permissions = await navigator.permissions.query({ name: 'camera' as PermissionName });
+            console.log('Camera permission status:', permissions.state);
+            return permissions.state === 'granted';
+        } catch (error) {
+            console.error('Error checking camera permissions:', error);
+            return false;
+        }
+    };
+
     // Set up event listeners only once when component mounts
     useEffect(() => {
         const userId = auth.user.id;
@@ -123,6 +134,11 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
         channel.listen('IncomingCall', (data: IncomingCallData) => {
             console.log('Incoming call event received:', data);
             setIncomingCall(data);
+        });
+
+        console.log('Video container dimensions:', {
+            width: remoteVideoRef.current?.parentElement?.clientWidth,
+            height: remoteVideoRef.current?.parentElement?.clientHeight,
         });
 
         channel.listen('CallStatusChanged', (data: CallStatusData) => {
@@ -152,6 +168,18 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
 
         channel.listen('WebRTCSignal', (data: any) => {
             console.log('WebRTC signal received:', data);
+            console.log('Signal type:', data.signal.type);
+
+            if (data.signal.type === 'offer' || data.signal.type === 'answer') {
+                console.log('Signal contains sdp:', typeof data.signal.sdp);
+                if (data.signal.sdp && typeof data.signal.sdp === 'string') {
+                    console.log('SDP contains video codecs:', data.signal.sdp.includes('video'));
+                } else if (data.signal.sdp) {
+                    console.log('SDP is present but not a string:', typeof data.signal.sdp);
+                } else {
+                    console.log('No SDP found in signal');
+                }
+            }
 
             if (!webRTCServiceRef.current) {
                 console.warn('WebRTC service not initialized when signal received');
@@ -192,23 +220,39 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
 
     // Initialize WebRTC
     const initializeWebRTC = async (isInitiator: boolean) => {
-        console.log(`Initializing WebRTC as ${isInitiator ? 'initiator' : 'receiver'}`);
+        console.log(`Initializing WebRTC as ${isInitiator ? 'initiator' : 'receiver'} for call type: ${callType}`);
 
         if (!webRTCServiceRef.current) {
             webRTCServiceRef.current = new WebRTCService(handleSignalingMessage);
         }
 
         try {
-            const localStream = await webRTCServiceRef.current.startLocalStream(callType === 'video');
+            const enableVideo = callType === 'video';
+            console.log(`Requesting local stream with video: ${enableVideo}`);
+            const localStream = await webRTCServiceRef.current.startLocalStream(enableVideo);
+
+            if (localStream) {
+                console.log('Local stream obtained with:');
+                console.log('- Video tracks:', localStream.getVideoTracks().length);
+                console.log('- Audio tracks:', localStream.getAudioTracks().length);
+            }
 
             if (localVideoRef.current && localStream) {
+                console.log('Setting local video source');
                 localVideoRef.current.srcObject = localStream;
             }
 
             webRTCServiceRef.current.setRemoteStreamCallback((remoteStream) => {
-                console.log('Remote stream received');
+                console.log('Remote stream received with:');
+                console.log('- Video tracks:', remoteStream.getVideoTracks().length);
+                console.log('- Audio tracks:', remoteStream.getAudioTracks().length);
+                console.log('- Video track enabled:', remoteStream.getVideoTracks()[0]?.enabled);
+
                 if (remoteVideoRef.current) {
+                    console.log('Setting remote video source');
                     remoteVideoRef.current.srcObject = remoteStream;
+
+                    remoteVideoRef.current.load();
                 }
             });
 
@@ -251,6 +295,13 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
         setIsInitiatingCall(true);
         setSelectedContact(contact);
         setCallType(type);
+
+        if (callType === 'video') {
+            const hasVideoPermission = await checkMediaPermissions();
+            if (!hasVideoPermission) {
+                console.warn('Camera permissions not granted, video may not work');
+            }
+        }
 
         try {
             const response = await axios.post('/calls', {
@@ -337,6 +388,38 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
 
         setIncomingCall(null);
     };
+
+    useEffect(() => {
+        if (webRTCServiceRef.current && callType === 'video') {
+            webRTCServiceRef.current.ensureVideoEnabled();
+        }
+
+        if (remoteVideoRef.current) {
+            remoteVideoRef.current.onloadedmetadata = () => {
+                console.log('Remote video dimensions:', {
+                    videoWidth: remoteVideoRef.current?.videoWidth,
+                    videoHeight: remoteVideoRef.current?.videoHeight,
+                });
+                remoteVideoRef.current?.play().catch((e) => console.error('Error playing video:', e));
+            };
+        }
+
+        if (localVideoRef.current) {
+            console.log('Setting up local video element');
+            localVideoRef.current.onloadedmetadata = () => {
+                console.log('Local video metadata loaded');
+                localVideoRef.current?.play().catch((e) => console.error('Error playing local video:', e));
+            };
+        }
+
+        if (remoteVideoRef.current) {
+            console.log('Setting up remote video element');
+            remoteVideoRef.current.onloadedmetadata = () => {
+                console.log('Remote video metadata loaded');
+                remoteVideoRef.current?.play().catch((e) => console.error('Error playing remote video:', e));
+            };
+        }
+    }, [isCallActive]);
 
     const getStatusColor = (status: ContactStatus): string => {
         switch (status) {
@@ -616,7 +699,20 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                             <div className="relative mb-4 aspect-video overflow-hidden rounded-lg bg-gray-900">
                                 <video ref={remoteVideoRef} className="h-full w-full object-cover" autoPlay playsInline />
                                 <div className="absolute right-4 bottom-4 h-32 w-32 overflow-hidden rounded-lg border-2 border-white bg-gray-800">
-                                    <video ref={localVideoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+                                    <video
+                                        ref={remoteVideoRef}
+                                        className="h-full w-full object-cover"
+                                        autoPlay
+                                        playsInline
+                                        muted={false}
+                                        style={{ backgroundColor: '#000' }}
+                                    />
+                                    {callType === 'video' && (
+                                        <div className="bg-opacity-50 absolute inset-0 flex items-center justify-center bg-black text-white">
+                                            {!remoteVideoRef.current?.srcObject ? 'Connecting video...' : ''}
+                                        </div>
+                                    )}
+
                                     {isVideoOff && (
                                         <div className="bg-opacity-70 absolute inset-0 flex items-center justify-center bg-gray-900">
                                             <VideoOff size={24} />
