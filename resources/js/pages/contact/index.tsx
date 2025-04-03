@@ -12,34 +12,11 @@ import { contactsData, recentCallsData } from '@/constants/data';
 import { WebRTCService } from '@/services/webrtcService';
 
 import AppLayout from '@/layouts/app-layout';
-import type { BreadcrumbItem, CallType, Contact, ContactStatus, SharedData } from '@/types';
+import type { BreadcrumbItem, CallStatusData, CallType, Contact, ContactStatus, IncomingCallData, SharedData } from '@/types';
 import { Head, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import { Mic, MicOff, MoreHorizontal, Phone, PhoneOff, User, UserPlus, Video, VideoOff } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-
-declare global {
-    interface Window {
-        // ts-ignore
-        Echo: any;
-        userId: number;
-    }
-}
-
-interface IncomingCallData {
-    call_id: number;
-    type: 'audio' | 'video';
-    caller: {
-        id: number;
-        name: string;
-        avatar: string;
-    };
-}
-
-interface CallStatusData {
-    call_id: number;
-    status: 'accepted' | 'rejected' | 'ended';
-}
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -47,6 +24,23 @@ const breadcrumbs: BreadcrumbItem[] = [
         href: '/contact',
     },
 ];
+
+export const getStatusColor = (status: ContactStatus): string => {
+    switch (status) {
+        case 'online':
+            return 'bg-green-500';
+        case 'busy':
+            return 'bg-red-500';
+        case 'away':
+            return 'bg-yellow-500';
+        case 'offline':
+            return 'bg-gray-400';
+        default:
+            return 'bg-gray-400';
+    }
+};
+
+
 const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
     const { auth } = usePage<SharedData>().props;
 
@@ -336,21 +330,6 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
         }
 
         setIncomingCall(null);
-    };
-
-    const getStatusColor = (status: ContactStatus): string => {
-        switch (status) {
-            case 'online':
-                return 'bg-green-500';
-            case 'busy':
-                return 'bg-red-500';
-            case 'away':
-                return 'bg-yellow-500';
-            case 'offline':
-                return 'bg-gray-400';
-            default:
-                return 'bg-gray-400';
-        }
     };
 
     return (

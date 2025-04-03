@@ -4,16 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import axios from 'axios';
 import { Phone, PhoneOff, Video } from 'lucide-react';
 import { useState } from 'react';
-
-interface IncomingCallDialogProps {
-    callId: number;
-    callerId: number;
-    callerName: string;
-    callerAvatar: string;
-    callType: 'audio' | 'video';
-    onAccept: () => void;
-    onReject: () => void;
-}
+import { IncomingCallDialogProps } from '@/types';
 
 const IncomingCallDialog = ({ callId, callerId, callerName, callerAvatar, callType, onAccept, onReject }: IncomingCallDialogProps) => {
     const [isProcessing, setIsProcessing] = useState(false);

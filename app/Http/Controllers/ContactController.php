@@ -30,7 +30,7 @@ class ContactController extends Controller
                     'location' => $faker->city(),
                 ];
             });
-        return Inertia::render('contact/index', [
+        return Inertia::render('contact/contacts', [
             'userContacts' => $userContacts
         ]);
     }
