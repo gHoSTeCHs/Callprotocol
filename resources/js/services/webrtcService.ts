@@ -1,5 +1,3 @@
-// services/WebRTCService.ts
-
 export class WebRTCService {
     private peerConnection: RTCPeerConnection | null = null;
     private localStream: MediaStream | null = null;

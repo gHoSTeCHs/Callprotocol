@@ -115,10 +115,10 @@ interface Echo {
     leave(channel: string): void;
 }
 
-declare global {
-    interface Window {
-        // ts-ignore
-        Echo: any;
-        userId: number;
-    }
+enum CallState {
+    IDLE = 'idle',
+    INITIATING = 'initiating',
+    RINGING = 'ringing',
+    CONNECTED = 'connected',
+    ENDING = 'ending'
 }

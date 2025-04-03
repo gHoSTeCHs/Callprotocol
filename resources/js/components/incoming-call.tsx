@@ -1,13 +1,14 @@
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { IncomingCallDialogProps } from '@/types';
 import axios from 'axios';
 import { Phone, PhoneOff, Video } from 'lucide-react';
 import { useState } from 'react';
-import { IncomingCallDialogProps } from '@/types';
 
 const IncomingCallDialog = ({ callId, callerId, callerName, callerAvatar, callType, onAccept, onReject }: IncomingCallDialogProps) => {
     const [isProcessing, setIsProcessing] = useState(false);
+    console.log(callerId);
 
     const handleAccept = async () => {
         setIsProcessing(true);

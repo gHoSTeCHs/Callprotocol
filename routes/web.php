@@ -4,6 +4,7 @@ use App\Events\TestBroadcast;
 use App\Http\Controllers\CallController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\SignalingController;
+use App\Http\Controllers\VideoCallController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Broadcast;
@@ -26,21 +27,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/calls/{call}', [CallController::class, 'updateCallStatus']);
     Route::post('/signaling', [SignalingController::class, 'sendSignal']);
 
+    Route::post('/video-call/request/{userId}', [VideoCallController::class, 'request']);
+    Route::post('/video-call/request/status/{userId}', [VideoCallController::class, 'requestStatus']);
+
     Route::post('/broadcasting/auth', function () {
         return Auth::user();
     });
 });
 
-Route::post('/test-broadcast/{user_id}', function(Request $request, $userId) {
-    Log::info('Testing broadcast to user', [
-        'user_id' => $userId,
-        'data' => $request->all()
-    ]);
-
-    broadcast(new TestBroadcast($userId, 'Test message'))->toOthers();
-
-    return response()->json(['status' => 'broadcasted']);
-});
 
 
 Broadcast::routes(['middleware' => ['auth:sanctum']]);

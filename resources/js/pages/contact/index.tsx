@@ -40,7 +40,6 @@ export const getStatusColor = (status: ContactStatus): string => {
     }
 };
 
-
 const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
     const { auth } = usePage<SharedData>().props;
 
@@ -102,89 +101,6 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
         }
     };
 
-    // Set up event listeners only once when component mounts
-    useEffect(() => {
-        const userId = auth.user.id;
-
-        if (!window.Echo) {
-            console.error('Echo is not initialized!');
-            return;
-        }
-
-        const channel = window.Echo.private(`user.${userId}`);
-
-        // Listen for incoming calls
-        channel.listen('IncomingCall', (data: IncomingCallData) => {
-            console.log('Incoming call event received:', data);
-            setIncomingCall(data);
-        });
-
-        channel.listen('CallStatusChanged', (data: CallStatusData) => {
-            console.log('Call status changed event received:', data);
-
-            if (data.status === 'accepted') {
-                if (isInitiatingCallRef.current) {
-                    setIsInitiatingCall(false);
-                    setIsCallActive(true);
-                    setActiveCallId(data.call_id);
-
-                    initializeWebRTC(true).catch((error) => {
-                        console.error('Failed to initialize WebRTC after call acceptance:', error);
-                        resetCallState();
-                    });
-                }
-            } else if (data.status === 'rejected' || data.status === 'ended') {
-                if (isInitiatingCallRef.current || isCallActiveRef.current) {
-                    resetCallState();
-                }
-
-                if (incomingCallRef.current && incomingCallRef.current.call_id === data.call_id) {
-                    setIncomingCall(null);
-                }
-            }
-        });
-
-        channel.listen('WebRTCSignal', (data: any) => {
-            console.log('WebRTC signal received:', data);
-
-            if (!webRTCServiceRef.current) {
-                console.warn('WebRTC service not initialized when signal received');
-                return;
-            }
-
-            const signal = data.signal;
-
-            try {
-                if (signal.type === 'offer') {
-                    webRTCServiceRef.current.handleIncomingCall(signal).catch((error) => {
-                        console.error('Error handling incoming call offer:', error);
-                    });
-                } else if (signal.type === 'answer') {
-                    webRTCServiceRef.current.handleAnswer(signal).catch((error) => {
-                        console.error('Error handling call answer:', error);
-                    });
-                } else if (signal.type === 'candidate') {
-                    webRTCServiceRef.current.handleIceCandidate(signal.candidate).catch((error) => {
-                        console.error('Error handling ICE candidate:', error);
-                    });
-                } else {
-                    console.warn('Unknown signal type received:', signal.type);
-                }
-            } catch (error) {
-                console.error('Error processing WebRTC signal:', error);
-            }
-        });
-
-        // Cleanup function runs when component unmounts
-        return () => {
-            console.log('Cleaning up Echo listeners');
-            channel.stopListening('IncomingCall');
-            channel.stopListening('CallStatusChanged');
-            channel.stopListening('WebRTCSignal');
-        };
-    }, [auth.user.id]);
-
-    // Initialize WebRTC
     const initializeWebRTC = async (isInitiator: boolean) => {
         console.log(`Initializing WebRTC as ${isInitiator ? 'initiator' : 'receiver'}`);
 
@@ -331,6 +247,87 @@ const ContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
 
         setIncomingCall(null);
     };
+
+    useEffect(() => {
+        const userId = auth.user.id;
+
+        if (!window.Echo) {
+            console.error('Echo is not initialized!');
+            return;
+        }
+
+        const channel = window.Echo.private(`user.${userId}`);
+
+        // Listen for incoming calls
+        channel.listen('IncomingCall', (data: IncomingCallData) => {
+            console.log('Incoming call event received:', data);
+            setIncomingCall(data);
+        });
+
+        channel.listen('CallStatusChanged', (data: CallStatusData) => {
+            console.log('Call status changed event received:', data);
+
+            if (data.status === 'accepted') {
+                if (isInitiatingCallRef.current) {
+                    setIsInitiatingCall(false);
+                    setIsCallActive(true);
+                    setActiveCallId(data.call_id);
+
+                    initializeWebRTC(true).catch((error) => {
+                        console.error('Failed to initialize WebRTC after call acceptance:', error);
+                        resetCallState();
+                    });
+                }
+            } else if (data.status === 'rejected' || data.status === 'ended') {
+                if (isInitiatingCallRef.current || isCallActiveRef.current) {
+                    resetCallState();
+                }
+
+                if (incomingCallRef.current && incomingCallRef.current.call_id === data.call_id) {
+                    setIncomingCall(null);
+                }
+            }
+        });
+
+        channel.listen('WebRTCSignal', (data: any) => {
+            console.log('WebRTC signal received:', data);
+
+            if (!webRTCServiceRef.current) {
+                console.warn('WebRTC service not initialized when signal received');
+                return;
+            }
+
+            const signal = data.signal;
+
+            try {
+                if (signal.type === 'offer') {
+                    webRTCServiceRef.current.handleIncomingCall(signal).catch((error) => {
+                        console.error('Error handling incoming call offer:', error);
+                    });
+                } else if (signal.type === 'answer') {
+                    webRTCServiceRef.current.handleAnswer(signal).catch((error) => {
+                        console.error('Error handling call answer:', error);
+                    });
+                } else if (signal.type === 'candidate') {
+                    webRTCServiceRef.current.handleIceCandidate(signal.candidate).catch((error) => {
+                        console.error('Error handling ICE candidate:', error);
+                    });
+                } else {
+                    console.warn('Unknown signal type received:', signal.type);
+                }
+            } catch (error) {
+                console.error('Error processing WebRTC signal:', error);
+            }
+        });
+
+        // Cleanup function runs when component unmounts
+        return () => {
+            console.log('Cleaning up Echo listeners');
+            channel.stopListening('IncomingCall');
+            channel.stopListening('CallStatusChanged');
+            channel.stopListening('WebRTCSignal');
+        };
+    }, [auth.user.id, initializeWebRTC]);
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>

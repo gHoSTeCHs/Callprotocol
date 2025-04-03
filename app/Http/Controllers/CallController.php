@@ -61,6 +61,6 @@ class CallController extends Controller
         // Broadcast the updated status
         broadcast(new CallStatusChanged($call))->toOthers();
 
-        return response()->json(['status' => $call->status]);
+        return response()->json(['status' => $call->status, 'call' => $call]);
     }
 }

@@ -1,3 +1,4 @@
+import IncomingCallDialog from '@/components/incoming-call';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,11 +8,24 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/app-layout';
 import { getStatusColor } from '@/pages/contact/index';
-import WebRTCManager from '@/services/getMediaPermissions';
-import { type BreadcrumbItem, type CallType, Contact, SharedData } from '@/types';
+import WebRTCManager from '@/services/webService';
+import { type BreadcrumbItem, type CallType, Contact, type ContactStatus, type IncomingCallData, SharedData } from '@/types';
 import { Head, usePage } from '@inertiajs/react';
+import axios from 'axios';
 import { MoreHorizontal, Phone, User, Video } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+
+declare global {
+    interface Window {
+        Echo: {
+            private: (channel: string) => {
+                listen: (event: string, callback: (data: any) => void) => void;
+                stopListening: (event: string) => void;
+            };
+        };
+    }
+}
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -20,52 +34,199 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
+enum CallState {
+    IDLE = 'idle',
+    INITIATING = 'initiating',
+    RINGING = 'ringing',
+    CONNECTED = 'connected',
+    ENDING = 'ending',
+}
+
 const NewContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
     const { auth } = usePage<SharedData>().props;
     const [contacts, setContacts] = useState<Contact[]>(userContacts);
     const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
-    const [isCallActive, setIsCallActive] = useState<boolean>(false);
+    const [callState, setCallState] = useState<CallState>(CallState.IDLE);
+    const [activeCallId, setActiveCallId] = useState<number | null>(null);
+
     const [callType, setCallType] = useState<CallType>(null);
+    const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
+
+    const [callError, setCallError] = useState<string | null>(null);
 
     const webRTCManagerRef = useRef<WebRTCManager | null>(null);
     const localVideoRef = useRef<HTMLVideoElement | null>(null);
     const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
     const startCall = async (contact: Contact, type: 'audio' | 'video'): Promise<void> => {
-        if (!webRTCManagerRef.current) return;
+        if (!webRTCManagerRef.current) {
+            toast('Call service not initialized. Please refresh and try again.');
+            return;
+        }
 
+        setCallState(CallState.INITIATING);
         setSelectedContact(contact);
         setCallType(type);
+        setCallError(null);
 
-        setTimeout(() => {
-            if (webRTCManagerRef.current) {
-                webRTCManagerRef.current.callUser();
-            }
-        }, 100);
+        try {
+            const response = await axios.post('/calls', {
+                receiver_id: contact.id,
+                type: type,
+            });
+
+            console.log('Call initiated successfully:', response.data);
+            setActiveCallId(response.data.call_id);
+            setCallState(CallState.RINGING);
+
+            webRTCManagerRef.current.callUser();
+        } catch (error) {
+            console.error('Failed to initiate call:', error);
+            toast('Could not connect to the recipient. Please try again later.');
+            resetCallState();
+        }
     };
 
-    const endCall = (): void => {
+    const resetCallState = () => {
+        console.log('Resetting call state');
+        if (webRTCManagerRef.current) {
+            webRTCManagerRef.current.disconnect();
+        }
+
+        setCallState(CallState.IDLE);
+        setCallType(null);
+        setActiveCallId(null);
+        setCallError(null);
+
+        if (auth?.user?.id) {
+            webRTCManagerRef.current = new WebRTCManager(
+                auth.user.id,
+                localVideoRef,
+                remoteVideoRef,
+                (status: CallState) => setCallState(status),
+                (error: string) => setCallError(error),
+            );
+        }
+
+        if (localVideoRef.current) {
+            localVideoRef.current.srcObject = null;
+        }
+
+        if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = null;
+        }
+    };
+
+    const handleAcceptIncomingCall = () => {
+        if (!incomingCall) return;
+
+        const caller = contacts.find((c) => c.id === incomingCall.caller.id) || {
+            id: incomingCall.caller.id,
+            name: incomingCall.caller.name,
+            avatar: incomingCall.caller.avatar,
+            status: 'online' as ContactStatus,
+            lastSeen: 'just now',
+            favorite: false,
+        };
+
+        setSelectedContact(caller);
+        setCallType(incomingCall.type);
+        setCallState(CallState.CONNECTED);
+        setActiveCallId(incomingCall.call_id);
+        setIncomingCall(null);
+    };
+
+    const handleRejectIncomingCall = async () => {
+        if (!incomingCall) return;
+
+        console.log('Rejecting incoming call:', incomingCall);
+
+        try {
+            await axios.patch(`/calls/${incomingCall.call_id}`, {
+                status: 'rejected',
+            });
+        } catch (error) {
+            console.error('Failed to reject call:', error);
+            toast("Could not reject the call. The caller may still think you're available.");
+        }
+
+        setIncomingCall(null);
+    };
+
+    const endCall = async (): Promise<void> => {
         if (webRTCManagerRef.current) {
             webRTCManagerRef.current.endCall();
         }
-        setIsCallActive(false);
+
+        if (activeCallId) {
+            try {
+                await axios.patch(`/calls/${activeCallId}`, {
+                    status: 'ended',
+                });
+            } catch (error) {
+                console.error('Failed to end call:', error);
+                toast('Call ended locally but server notification failed.');
+            }
+        }
+
+        resetCallState();
     };
 
     useEffect(() => {
-        webRTCManagerRef.current = new WebRTCManager(auth.user.id, localVideoRef, remoteVideoRef, (status: boolean) => setIsCallActive(status));
+        if (auth?.user?.id) {
+            webRTCManagerRef.current = new WebRTCManager(
+                auth.user.id,
+                localVideoRef,
+                remoteVideoRef,
+                (status: CallState) => setCallState(status),
+                (error: string) => {
+                    setCallError(error);
+                    toast('Error connecting to user');
+                },
+            );
+        }
 
         return () => {
             if (webRTCManagerRef.current) {
                 webRTCManagerRef.current.disconnect();
+                webRTCManagerRef.current = null;
             }
         };
-    }, [auth.user.id]);
+    }, [auth?.user?.id]);
 
     useEffect(() => {
         if (webRTCManagerRef.current && selectedContact) {
             webRTCManagerRef.current.setSelectedUser(selectedContact);
         }
     }, [selectedContact]);
+
+    useEffect(() => {
+        const userId = auth?.user?.id;
+        if (!userId) return;
+
+        if (!window.Echo) {
+            console.error('Echo is not initialized!');
+            toast('Real-time communication service is unavailable.');
+            return;
+        }
+
+        const channel = window.Echo.private(`user.${userId}`);
+
+        let isMounted = true;
+
+        channel.listen('IncomingCall', (data: IncomingCallData) => {
+            console.log('Incoming call event received:', data);
+            if (isMounted) {
+                setIncomingCall(data);
+            }
+        });
+
+        return () => {
+            isMounted = false;
+
+            channel.stopListening('IncomingCall');
+        };
+    }, [auth?.user?.id]);
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -148,7 +309,7 @@ const NewContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                                                 variant="outline"
                                                 className="h-12 w-12 rounded-full p-0"
                                                 onClick={() => startCall(selectedContact, 'audio')}
-                                                disabled={isCallActive}
+                                                // disabled={CallState.INITIATING || CallState.CONNECTED}
                                             >
                                                 <Phone />
                                             </Button>
@@ -156,7 +317,7 @@ const NewContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                                                 variant="outline"
                                                 className="h-12 w-12 rounded-full p-0"
                                                 onClick={() => startCall(selectedContact, 'video')}
-                                                disabled={isCallActive}
+                                                // disabled={CallState.CONNECTED || CallState.INITIATING}
                                             >
                                                 <Video />
                                             </Button>
@@ -204,8 +365,20 @@ const NewContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                 </div>
             </div>
 
+            {incomingCall && (
+                <IncomingCallDialog
+                    callId={incomingCall.call_id}
+                    callerId={incomingCall.caller.id}
+                    callerName={incomingCall.caller.name}
+                    callerAvatar={incomingCall.caller.avatar}
+                    callType={incomingCall.type}
+                    onAccept={handleAcceptIncomingCall}
+                    onReject={handleRejectIncomingCall}
+                />
+            )}
+
             {/* Video Call Dialog */}
-            <Dialog open={isCallActive} onOpenChange={(open) => !open && endCall()}>
+            <Dialog open={callState === CallState.CONNECTED} onOpenChange={(open) => !open && endCall()}>
                 <DialogContent className="max-w-3xl p-0">
                     <div className="flex flex-col gap-4 p-4">
                         <div className="flex items-center justify-between">
@@ -214,6 +387,12 @@ const NewContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                                 End Call
                             </Button>
                         </div>
+
+                        {callError && (
+                            <div className="relative mb-2 rounded border border-red-400 bg-red-100 px-4 py-3 text-red-700">
+                                <span className="block sm:inline">{callError}</span>
+                            </div>
+                        )}
 
                         <div className="grid grid-cols-2 gap-4">
                             <div className="relative h-64 overflow-hidden rounded-md bg-gray-100">
@@ -228,6 +407,10 @@ const NewContactPage = ({ userContacts }: { userContacts: Contact[] }) => {
                                 <div className="absolute right-2 bottom-2 rounded bg-black/70 px-2 py-1 text-sm text-white">You</div>
                             </div>
                         </div>
+
+                        {/*{isInitiatingCall && !isCallActive && (*/}
+                        {/*    <div className="my-2 text-center text-gray-500">Calling {selectedContact?.name}...</div>*/}
+                        {/*)}*/}
                     </div>
                 </DialogContent>
             </Dialog>
