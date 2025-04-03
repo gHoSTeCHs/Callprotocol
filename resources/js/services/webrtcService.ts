@@ -60,7 +60,7 @@ export class WebRTCService {
 
             this.onSignalingMessage({
                 type: 'offer',
-                sdp: offer,
+                sdp: offer.sdp,
             });
         } catch (error) {
             console.error('Error creating offer:', error);
@@ -68,8 +68,9 @@ export class WebRTCService {
         }
     }
 
-    public async handleIncomingCall(offer: RTCSessionDescriptionInit): Promise<void> {
+    public async handleIncomingCall(offer: any): Promise<void> {
         this.isInitiator = false;
+        console.log('Handling incoming call with offer:', offer);
 
         if (!this.peerConnection || !this.localStream) {
             throw new Error('Peer connection or local stream not set up');
@@ -82,14 +83,26 @@ export class WebRTCService {
         });
 
         try {
-            const sessionDesc =
-                typeof offer === 'object' && offer.sdp
-                    ? new RTCSessionDescription({
-                          type: 'offer',
-                          sdp: typeof offer.sdp === 'string' ? offer.sdp : JSON.stringify(offer.sdp),
-                      })
-                    : new RTCSessionDescription(offer);
+            // Fix: Handle various offer formats that might come from signaling
+            let sdp = '';
+            if (typeof offer === 'string') {
+                sdp = offer;
+            } else if (offer && typeof offer.sdp === 'string') {
+                sdp = offer.sdp;
+            } else if (offer && offer.sdp && typeof offer.sdp.sdp === 'string') {
+                sdp = offer.sdp.sdp;
+            } else {
+                console.log('Unable to extract SDP from offer:', offer);
+                throw new Error('Invalid offer format');
+            }
 
+            // Create a clean session description
+            const sessionDesc = new RTCSessionDescription({
+                type: 'offer',
+                sdp: sdp
+            });
+
+            console.log('Setting remote description with SDP:', sessionDesc.sdp);
             await this.peerConnection.setRemoteDescription(sessionDesc);
             await this.processPendingIceCandidates();
 
@@ -98,7 +111,7 @@ export class WebRTCService {
 
             this.onSignalingMessage({
                 type: 'answer',
-                sdp: answer,
+                sdp: answer.sdp,
             });
         } catch (error) {
             console.error('Error creating answer:', error);
@@ -106,14 +119,32 @@ export class WebRTCService {
         }
     }
 
-    public async handleAnswer(answer: RTCSessionDescriptionInit): Promise<void> {
+    public async handleAnswer(answer: any): Promise<void> {
         if (!this.peerConnection) {
             throw new Error('Peer connection not set up');
         }
 
         try {
-            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            // Fix: Handle various answer formats
+            let sdp = '';
+            if (typeof answer === 'string') {
+                sdp = answer;
+            } else if (answer && typeof answer.sdp === 'string') {
+                sdp = answer.sdp;
+            } else if (answer && answer.sdp && typeof answer.sdp.sdp === 'string') {
+                sdp = answer.sdp.sdp;
+            } else {
+                console.log('Unable to extract SDP from answer:', answer);
+                throw new Error('Invalid answer format');
+            }
 
+            const sessionDesc = new RTCSessionDescription({
+                type: 'answer',
+                sdp: sdp
+            });
+
+            console.log('Setting remote description with answer SDP:', sessionDesc.sdp);
+            await this.peerConnection.setRemoteDescription(sessionDesc);
             await this.processPendingIceCandidates();
         } catch (error) {
             console.error('Error setting remote description:', error);
@@ -186,7 +217,14 @@ export class WebRTCService {
 
     private setupPeerConnection(): void {
         const configuration = {
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+            iceServers:[
+                {
+                    urls:[
+                        'stun:stun.l.google.com:19302',
+                        'stun:stun1.l.google.com:19302'
+                    ]
+                }
+            ]
         };
 
         this.peerConnection = new RTCPeerConnection(configuration);
